@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		6F0A18A82F5D506B004C2A0D /* scane app.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "scane app.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		6F0A18A82F5D506B004C2A0D /* scane app.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "scane app.app"; path = "Master Payment App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		6F0A18AA2F5D506B004C2A0D /* scane app */ = {
+		6F0A18AA2F5D506B004C2A0D /* Master Payment App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "scane app";
+			path = "Master Payment App";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,7 +32,7 @@
 		6F0A189F2F5D506B004C2A0D = {
 			isa = PBXGroup;
 			children = (
-				6F0A18AA2F5D506B004C2A0D /* scane app */,
+				6F0A18AA2F5D506B004C2A0D /* Master Payment App */,
 				6F0A18A92F5D506B004C2A0D /* Products */,
 			);
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		6F0A18A72F5D506B004C2A0D /* scane app */ = {
+		6F0A18A72F5D506B004C2A0D /* Master Payment App */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 6F0A18B32F5D506D004C2A0D /* Build configuration list for PBXNativeTarget "scane app" */;
+			buildConfigurationList = 6F0A18B32F5D506D004C2A0D /* Build configuration list for PBXNativeTarget "Master Payment App" */;
 			buildPhases = (
 				6F0A18A42F5D506B004C2A0D /* Sources */,
 				6F0A18A52F5D506B004C2A0D /* Frameworks */,
@@ -61,12 +61,12 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				6F0A18AA2F5D506B004C2A0D /* scane app */,
+				6F0A18AA2F5D506B004C2A0D /* Master Payment App */,
 			);
-			name = "scane app";
+			name = "Master Payment App";
 			packageProductDependencies = (
 			);
-			productName = "scane app";
+			productName = "Master Payment App";
 			productReference = 6F0A18A82F5D506B004C2A0D /* scane app.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -99,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				6F0A18A72F5D506B004C2A0D /* scane app */,
+				6F0A18A72F5D506B004C2A0D /* Master Payment App */,
 			);
 		};
 /* End PBXProject section */
@@ -341,7 +341,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		6F0A18B32F5D506D004C2A0D /* Build configuration list for PBXNativeTarget "scane app" */ = {
+		6F0A18B32F5D506D004C2A0D /* Build configuration list for PBXNativeTarget "Master Payment App" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				6F0A18B42F5D506D004C2A0D /* Debug */,
