@@ -1,13 +1,15 @@
 //
 //  ContentView.swift
-//  scane app
+//  Master Payment App
 //
 //  Created by sheikh abu mohamed on 08/03/26.
 //
-//  3-screen flow:
-//  1. ScannerScreen  – camera QR scanner
-//  2. AmountScreen   – enter payment amount
-//  3. SuccessScreen  – Paytm-style receipt (from PaymentSuccessViewController.swift)
+//  Complete app flow:
+//  1. DashboardScreen - Main wallet & payment hub
+//  2. ScannerScreen - QR code scanner for payments
+//  3. AmountScreen - Payment amount confirmation
+//  4. SuccessScreen - Payment receipt
+//  5. ReceiveQRScreen - Show QR for receiving payments
 //
 
 import SwiftUI
@@ -17,25 +19,27 @@ import AudioToolbox
 // MARK: - App Root
 
 struct ContentView: View {
-
-    /// Drives the full navigation stack
     @State private var path = NavigationPath()
+    @StateObject private var walletManager = WalletManager()
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScannerScreen(path: $path)
+            DashboardScreen(path: $path, walletManager: walletManager)
                 .navigationDestination(for: AppRoute.self) { route in
                     switch route {
+                    case .scanner:
+                        ScannerScreen(path: $path, walletManager: walletManager)
                     case .amount(let upiID):
-                        AmountScreen(path: $path, upiID: upiID)
+                        AmountScreen(path: $path, upiID: upiID, walletManager: walletManager)
                     case .success(let upiID, let amount, let date):
                         PaymentSuccessView(upiID: upiID, amount: amount, paymentDate: date)
                             .navigationBarHidden(true)
+                    case .receiveQR:
+                        ReceiveQRScreen(walletManager: walletManager)
                     }
                 }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PaymentDoneNotification"))) { _ in
-            // Pop all the way back to the scanner
             path = NavigationPath()
         }
     }
@@ -44,15 +48,411 @@ struct ContentView: View {
 // MARK: - Navigation Routes
 
 enum AppRoute: Hashable {
+    case scanner
     case amount(upiID: String)
     case success(upiID: String, amount: String, date: Date)
+    case receiveQR
 }
+
+// MARK: - Wallet Manager
+
+class WalletManager: ObservableObject {
+    @Published var balance: Double = 5000.0
+    @Published var transactions: [Transaction] = [
+        Transaction(id: "1", type: .received, amount: 500, from: "Rahul Sharma", date: Date().addingTimeInterval(-3600)),
+        Transaction(id: "2", type: .sent, amount: 250, to: "Priya Singh", date: Date().addingTimeInterval(-7200))
+    ]
+    
+    func deductFromWallet(_ amount: Double) {
+        balance -= amount
+        transactions.append(Transaction(id: UUID().uuidString, type: .sent, amount: amount, to: "Payment", date: Date()))
+    }
+    
+    func addToWallet(_ amount: Double, from: String) {
+        balance += amount
+        transactions.append(Transaction(id: UUID().uuidString, type: .received, amount: amount, from: from, date: Date()))
+    }
+}
+
+struct Transaction: Identifiable {
+    let id: String
+    enum TransactionType {
+        case sent
+        case received
+    }
+    let type: TransactionType
+    let amount: Double
+    let from: String?
+    let to: String?
+    let date: Date
+    
+    init(id: String, type: TransactionType, amount: Double, from: String? = nil, to: String? = nil, date: Date) {
+        self.id = id
+        self.type = type
+        self.amount = amount
+        self.from = from
+        self.to = to
+        self.date = date
+    }
+}
+
+// MARK: - Dashboard Screen
+
+struct DashboardScreen: View {
+    @Binding var path: NavigationPath
+    @ObservedObject var walletManager: WalletManager
+    
+    private let paytmBlue = Color(red: 0, green: 0.45, blue: 0.85)
+    private let successGreen = Color(red: 0.13, green: 0.76, blue: 0.37)
+    
+    var body: some View {
+        ZStack {
+            Color(red: 0.97, green: 0.98, blue: 0.99).ignoresSafeArea()
+            
+            ScrollView {
+                VStack(spacing: 20) {
+                    // MARK: - Header with greeting
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Welcome back!")
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                        Text("Sheikh Abu Mohamed")
+                            .font(.title2.bold())
+                            .foregroundColor(.black)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+                    
+                    // MARK: - Wallet Card
+                    VStack(spacing: 16) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Wallet Balance")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.8))
+                                Text("₹\(String(format: "%.2f", walletManager.balance))")
+                                    .font(.system(size: 32, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                            Spacer()
+                            Image(systemName: "wallet.pass.fill")
+                                .font(.system(size: 40))
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                        
+                        Divider()
+                            .background(Color.white.opacity(0.3))
+                        
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Card Number")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Text("**** **** **** 1234")
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundColor(.white)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text("Valid Thru")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Text("03/28")
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                    }
+                    .padding(24)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [paytmBlue, Color(red: 0, green: 0.35, blue: 0.75)]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .cornerRadius(20)
+                    .padding(.horizontal, 20)
+                    .shadow(color: paytmBlue.opacity(0.3), radius: 12, x: 0, y: 8)
+                    
+                    // MARK: - Action Buttons
+                    HStack(spacing: 12) {
+                        Button {
+                            path.append(.scanner)
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "qrcode.viewfinder")
+                                    .font(.title2)
+                                Text("Pay Now")
+                                    .font(.caption.bold())
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .foregroundColor(.white)
+                            .background(paytmBlue)
+                            .cornerRadius(12)
+                        }
+                        
+                        Button {
+                            path.append(.receiveQR)
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "qrcode")
+                                    .font(.title2)
+                                Text("Request")
+                                    .font(.caption.bold())
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .foregroundColor(.white)
+                            .background(successGreen)
+                            .cornerRadius(12)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    // MARK: - Daily News Section
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Latest Updates")
+                                .font(.headline.bold())
+                            Spacer()
+                            Image(systemName: "newspaper.fill")
+                                .foregroundColor(paytmBlue)
+                        }
+                        .padding(.horizontal, 20)
+                        
+                        VStack(spacing: 12) {
+                            NewsCard(
+                                icon: "📱",
+                                title: "New Feature Unlock",
+                                description: "Send money internationally at 0% fees",
+                                color: Color.blue.opacity(0.1)
+                            )
+                            
+                            NewsCard(
+                                icon: "🎁",
+                                title: "Cashback Offer",
+                                description: "Get 10% cashback on every 5 transactions",
+                                color: Color.green.opacity(0.1)
+                            )
+                            
+                            NewsCard(
+                                icon: "🔐",
+                                title: "Security Update",
+                                description: "Biometric authentication now available",
+                                color: Color.purple.opacity(0.1)
+                            )
+                            
+                            NewsCard(
+                                icon: "🏆",
+                                title: "Loyalty Program",
+                                description: "Earn rewards with every transaction",
+                                color: Color.orange.opacity(0.1)
+                            )
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    .padding(.top, 10)
+                    
+                    // MARK: - Recent Transactions
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Recent Transactions")
+                            .font(.headline.bold())
+                            .padding(.horizontal, 20)
+                        
+                        VStack(spacing: 0) {
+                            ForEach(walletManager.transactions.prefix(3)) { transaction in
+                                TransactionRow(transaction: transaction)
+                                if transaction.id != walletManager.transactions.prefix(3).last?.id {
+                                    Divider()
+                                        .padding(.vertical, 8)
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .padding(.horizontal, 20)
+                    }
+                    
+                    Spacer(minLength: 20)
+                }
+                .padding(.vertical, 20)
+            }
+        }
+        .navigationBarHidden(true)
+    }
+}
+
+// MARK: - News Card
+
+struct NewsCard: View {
+    let icon: String
+    let title: String
+    let description: String
+    let color: Color
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(icon)
+                .font(.system(size: 28))
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.bold())
+                    .foregroundColor(.black)
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .lineLimit(2)
+            }
+            
+            Spacer()
+            Image(systemName: "chevron.right")
+                .foregroundColor(.gray)
+        }
+        .padding(12)
+        .background(color)
+        .cornerRadius(10)
+    }
+}
+
+// MARK: - Transaction Row
+
+struct TransactionRow: View {
+    let transaction: Transaction
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: transaction.type == .sent ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                .font(.title2)
+                .foregroundColor(transaction.type == .sent ? .red : .green)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(transaction.type == .sent ? "Paid to" : "Received from")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                Text(transaction.type == .sent ? (transaction.to ?? "") : (transaction.from ?? ""))
+                    .font(.subheadline.bold())
+                    .foregroundColor(.black)
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(transaction.type == .sent ? "-" : "+")₹\(String(format: "%.2f", transaction.amount))")
+                    .font(.subheadline.bold())
+                    .foregroundColor(transaction.type == .sent ? .red : .green)
+                Text(transaction.date, style: .time)
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+        }
+    }
+}
+
+// MARK: - Receive QR Screen
+
+struct ReceiveQRScreen: View {
+    @ObservedObject var walletManager: WalletManager
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        ZStack {
+            Color(red: 0.97, green: 0.98, blue: 0.99).ignoresSafeArea()
+            
+            VStack(spacing: 24) {
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("Back")
+                        }
+                        .foregroundColor(.blue)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                
+                VStack(spacing: 16) {
+                    Text("Receive Money")
+                        .font(.title2.bold())
+                    
+                    Text("Share this QR code with anyone to receive payment")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                }
+                
+                Spacer()
+                
+                VStack(spacing: 20) {
+                    // QR Code placeholder
+                    ZStack {
+                        Color.white
+                        VStack(spacing: 0) {
+                            ForEach(0..<15, id: \.self) { _ in
+                                HStack(spacing: 0) {
+                                    ForEach(0..<15, id: \.self) { _ in
+                                        Rectangle()
+                                            .fill(Bool.random() ? Color.black : Color.white)
+                                            .frame(width: 8, height: 8)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .frame(height: 280)
+                    .cornerRadius(16)
+                    .padding(24)
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .shadow(color: Color.black.opacity(0.1), radius: 8)
+                    .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 8) {
+                        Text("Your UPI ID")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                        Text("aqi97@upi")
+                            .font(.headline.bold())
+                            .foregroundColor(.black)
+                    }
+                    
+                    Button {
+                        UIPasteboard.general.string = "aqi97@upi"
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "doc.on.doc")
+                            Text("Copy UPI ID")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .foregroundColor(.white)
+                        .background(Color(red: 0, green: 0.45, blue: 0.85))
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal, 20)
+                }
+                
+                Spacer()
+            }
+        }
+    }
+}
+
 
 // MARK: - Screen 1 · QR Scanner
 
 struct ScannerScreen: View {
-
     @Binding var path: NavigationPath
+    @ObservedObject var walletManager: WalletManager
     @State private var isTorchOn = false
     @State private var cameraError = false
 
@@ -162,13 +562,14 @@ struct ScanCorners: Shape {
 // MARK: - Screen 2 · Amount Entry
 
 struct AmountScreen: View {
-
     @Binding var path: NavigationPath
     let upiID: String
+    @ObservedObject var walletManager: WalletManager
 
     @State private var amount: String = ""
     @State private var shake = false
     @FocusState private var focused: Bool
+    @State private var showInsufficientError = false
 
     private let paytmBlue = Color(red: 0, green: 0.45, blue: 0.85)
 
@@ -232,11 +633,21 @@ struct AmountScreen: View {
                 // ── Pay button ────────────────────────────────
                 Button {
                     guard !amount.trimmingCharacters(in: .whitespaces).isEmpty,
-                          let _ = Double(amount), Double(amount)! > 0 else {
+                          let amountValue = Double(amount), amountValue > 0 else {
                         withAnimation(.default) { shake = true }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { shake = false }
                         return
                     }
+                    
+                    // Check wallet balance
+                    if amountValue > walletManager.balance {
+                        showInsufficientError = true
+                        return
+                    }
+                    
+                    // Deduct from wallet
+                    walletManager.deductFromWallet(amountValue)
+                    
                     focused = false
                     AudioServicesPlaySystemSound(1001)
                     path.append(AppRoute.success(upiID: upiID, amount: amount, date: Date()))
@@ -273,6 +684,11 @@ struct AmountScreen: View {
         .toolbarBackground(paytmBlue, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .onAppear { focused = true }
+        .alert("Insufficient Balance", isPresented: $showInsufficientError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("You don't have enough balance. Your balance is ₹\(String(format: "%.2f", walletManager.balance))")
+        }
     }
 }
 
