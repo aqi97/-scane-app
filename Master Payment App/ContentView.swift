@@ -15,32 +15,37 @@
 import SwiftUI
 import AVFoundation
 import AudioToolbox
+import Combine
 
 // MARK: - App Root
 
 struct ContentView: View {
-    @State private var path = NavigationPath()
+    @State private var path: [AppRoute] = []
     @StateObject private var walletManager = WalletManager()
 
     var body: some View {
         NavigationStack(path: $path) {
             DashboardScreen(path: $path, walletManager: walletManager)
                 .navigationDestination(for: AppRoute.self) { route in
-                    switch route {
-                    case .scanner:
-                        ScannerScreen(path: $path, walletManager: walletManager)
-                    case .amount(let upiID):
-                        AmountScreen(path: $path, upiID: upiID, walletManager: walletManager)
-                    case .success(let upiID, let amount, let date):
-                        PaymentSuccessView(upiID: upiID, amount: amount, paymentDate: date)
-                            .navigationBarHidden(true)
-                    case .receiveQR:
-                        ReceiveQRScreen(walletManager: walletManager)
+                    Group {
+                        switch route {
+                        case .scanner:
+                            ScannerScreen(path: $path, walletManager: walletManager)
+                        case .amount(let upiID):
+                            AmountScreen(path: $path, upiID: upiID, walletManager: walletManager)
+                        case .success(let upiID, let amount, let date):
+                            PaymentSuccessView(upiID: upiID, amount: amount, paymentDate: date)
+                                .navigationBarHidden(true)
+                        case .receiveQR:
+                            ReceiveQRScreen(walletManager: walletManager)
+                        case .addMoney:
+                            AddMoneyScreen(path: $path, walletManager: walletManager)
+                        }
                     }
                 }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PaymentDoneNotification"))) { _ in
-            path = NavigationPath()
+            path = []
         }
     }
 }
@@ -52,6 +57,37 @@ enum AppRoute: Hashable {
     case amount(upiID: String)
     case success(upiID: String, amount: String, date: Date)
     case receiveQR
+    case addMoney
+    
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case .scanner:
+            hasher.combine("scanner")
+        case .amount(let upiID):
+            hasher.combine("amount")
+            hasher.combine(upiID)
+        case .success(let upiID, let amount, let date):
+            hasher.combine("success")
+            hasher.combine(upiID)
+            hasher.combine(amount)
+            hasher.combine(date.timeIntervalSince1970)
+        case .receiveQR:
+            hasher.combine("receiveQR")
+        case .addMoney:
+            hasher.combine("addMoney")
+        }
+    }
+    
+    static func == (lhs: AppRoute, rhs: AppRoute) -> Bool {
+        switch (lhs, rhs) {
+        case (.scanner, .scanner): return true
+        case (.amount(let l), .amount(let r)): return l == r
+        case (.success(let lu, let la, _), .success(let ru, let ra, _)): return lu == ru && la == ra
+        case (.receiveQR, .receiveQR): return true
+        case (.addMoney, .addMoney): return true
+        default: return false
+        }
+    }
 }
 
 // MARK: - Wallet Manager
@@ -62,6 +98,10 @@ class WalletManager: ObservableObject {
         Transaction(id: "1", type: .received, amount: 500, from: "Rahul Sharma", date: Date().addingTimeInterval(-3600)),
         Transaction(id: "2", type: .sent, amount: 250, to: "Priya Singh", date: Date().addingTimeInterval(-7200))
     ]
+    
+    init() {
+        // Initialize with default values
+    }
     
     func deductFromWallet(_ amount: Double) {
         balance -= amount
@@ -99,7 +139,7 @@ struct Transaction: Identifiable {
 // MARK: - Dashboard Screen
 
 struct DashboardScreen: View {
-    @Binding var path: NavigationPath
+    @Binding var path: [AppRoute]
     @ObservedObject var walletManager: WalletManager
     
     private let paytmBlue = Color(red: 0, green: 0.45, blue: 0.85)
@@ -162,6 +202,23 @@ struct DashboardScreen: View {
                                     .font(.system(.body, design: .monospaced))
                                     .foregroundColor(.white)
                             }
+                        }
+                        
+                        Divider()
+                            .background(Color.white.opacity(0.3))
+                        
+                        Button {
+                            path.append(.addMoney)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title3)
+                                Text("Add Money")
+                                    .font(.subheadline.bold())
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .foregroundColor(paytmBlue)
                         }
                     }
                     .padding(24)
@@ -451,7 +508,7 @@ struct ReceiveQRScreen: View {
 // MARK: - Screen 1 · QR Scanner
 
 struct ScannerScreen: View {
-    @Binding var path: NavigationPath
+    @Binding var path: [AppRoute]
     @ObservedObject var walletManager: WalletManager
     @State private var isTorchOn = false
     @State private var cameraError = false
@@ -562,7 +619,7 @@ struct ScanCorners: Shape {
 // MARK: - Screen 2 · Amount Entry
 
 struct AmountScreen: View {
-    @Binding var path: NavigationPath
+    @Binding var path: [AppRoute]
     let upiID: String
     @ObservedObject var walletManager: WalletManager
 
@@ -793,6 +850,138 @@ class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDel
         captureSession.stopRunning()
         DispatchQueue.main.async {
             self.completion?(value)
+        }
+    }
+}
+
+// MARK: - Add Money Screen
+
+struct AddMoneyScreen: View {
+    @Binding var path: [AppRoute]
+    @ObservedObject var walletManager: WalletManager
+    @Environment(\.dismiss) var dismiss
+    
+    @State private var amount: String = ""
+    @State private var shake = false
+    @State private var showSuccess = false
+    @FocusState private var focused: Bool
+    
+    private let paytmBlue = Color(red: 0, green: 0.45, blue: 0.85)
+    private let successGreen = Color(red: 0.13, green: 0.76, blue: 0.37)
+    
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                
+                // ── Header card ───────────────────────────────
+                VStack(spacing: 10) {
+                    // Bank icon
+                    ZStack {
+                        Circle()
+                            .fill(successGreen.opacity(0.12))
+                            .frame(width: 72, height: 72)
+                        Image(systemName: "banknote.fill")
+                            .font(.system(size: 30))
+                            .foregroundColor(successGreen)
+                    }
+                    
+                    Text("Add Money to Wallet")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Text("Quick & Secure")
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 30)
+                }
+                .padding(.vertical, 28)
+                .frame(maxWidth: .infinity)
+                .background(Color(red: 0.88, green: 0.95, blue: 1))
+                
+                // ── Amount input ──────────────────────────────
+                VStack(spacing: 6) {
+                    Text("Enter Amount")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    HStack(alignment: .center, spacing: 4) {
+                        Text("₹")
+                            .font(.system(size: 36, weight: .bold))
+                            .foregroundColor(successGreen)
+                        TextField("0", text: $amount)
+                            .font(.system(size: 44, weight: .bold))
+                            .keyboardType(.numberPad)
+                            .focused($focused)
+                            .foregroundColor(.primary)
+                            .frame(minWidth: 80)
+                            .fixedSize()
+                    }
+                    .modifier(ShakeEffect(animatableData: shake ? 1 : 0))
+                    
+                    Divider()
+                        .background(successGreen)
+                }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 32)
+                
+                // ── Add Money button ────────────────────────────────
+                Button {
+                    guard !amount.trimmingCharacters(in: .whitespaces).isEmpty,
+                          let amountValue = Double(amount), amountValue > 0 else {
+                        withAnimation(.default) { shake = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { shake = false }
+                        return
+                    }
+                    
+                    // Add money to wallet
+                    walletManager.addToWallet(amountValue, from: "Bank Transfer")
+                    
+                    focused = false
+                    AudioServicesPlaySystemSound(1001)
+                    showSuccess = true
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        path.removeLast()
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.title3)
+                        Text("Add  ₹\(amount.isEmpty ? "0" : amount)")
+                            .font(.title3.bold())
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(successGreen)
+                    .cornerRadius(14)
+                    .padding(.horizontal, 28)
+                }
+                .padding(.top, 10)
+                
+                // ── Safe note ──────────────────────────────────
+                HStack(spacing: 4) {
+                    Image(systemName: "lock.fill")
+                        .font(.caption2)
+                    Text("100% safe & secured · Instant Credit")
+                        .font(.caption2)
+                }
+                .foregroundColor(.secondary)
+                .padding(.top, 18)
+            }
+        }
+        .navigationTitle("Add Money")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarBackground(successGreen, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .onAppear { focused = true }
+        .alert("Money Added! 🎉", isPresented: $showSuccess) {
+            Button("Done", role: .cancel) {}
+        } message: {
+            Text("₹\(amount) has been added to your wallet successfully.")
         }
     }
 }
