@@ -9,6 +9,11 @@ import SwiftUI
 
 @main
 struct scane_appApp: App {
+    init() {
+        // Initialize Firebase when app launches
+        FirebaseManager.shared.initializeFirebase()
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()

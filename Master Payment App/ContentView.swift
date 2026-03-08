@@ -16,6 +16,7 @@ import SwiftUI
 import AVFoundation
 import AudioToolbox
 import Combine
+import FirebaseCore
 
 // MARK: - App Root
 
@@ -40,12 +41,22 @@ struct ContentView: View {
                             ReceiveQRScreen(walletManager: walletManager)
                         case .addMoney:
                             AddMoneyScreen(path: $path, walletManager: walletManager)
+                        case .sendMessage(let recipientUPI, let amount):
+                            SendMessageScreen(path: $path, recipientUPI: recipientUPI, amount: amount)
                         }
                     }
                 }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PaymentDoneNotification"))) { _ in
-            path = []
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PaymentCompleted"))) { notification in
+            // Navigate to send message screen after payment
+            if let userInfo = notification.userInfo,
+               let upiID = userInfo["upiID"] as? String,
+               let amountStr = userInfo["amount"] as? String,
+               let amount = Double(amountStr) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    path.append(.sendMessage(recipientUPI: upiID, amount: amount))
+                }
+            }
         }
     }
 }
@@ -58,6 +69,7 @@ enum AppRoute: Hashable {
     case success(upiID: String, amount: String, date: Date)
     case receiveQR
     case addMoney
+    case sendMessage(recipientUPI: String, amount: Double)
     
     func hash(into hasher: inout Hasher) {
         switch self {
@@ -75,6 +87,10 @@ enum AppRoute: Hashable {
             hasher.combine("receiveQR")
         case .addMoney:
             hasher.combine("addMoney")
+        case .sendMessage(let upiID, let amount):
+            hasher.combine("sendMessage")
+            hasher.combine(upiID)
+            hasher.combine(amount)
         }
     }
     
@@ -85,6 +101,7 @@ enum AppRoute: Hashable {
         case (.success(let lu, let la, _), .success(let ru, let ra, _)): return lu == ru && la == ra
         case (.receiveQR, .receiveQR): return true
         case (.addMoney, .addMoney): return true
+        case (.sendMessage(let lu, let la), .sendMessage(let ru, let ra)): return lu == ru && la == ra
         default: return false
         }
     }
@@ -100,7 +117,8 @@ class WalletManager: ObservableObject {
     ]
     
     init() {
-        // Initialize with default values
+        FirebaseApp.configure()
+        FirebaseManager.shared.initializeFirebase()
     }
     
     func deductFromWallet(_ amount: Double) {
@@ -982,6 +1000,166 @@ struct AddMoneyScreen: View {
             Button("Done", role: .cancel) {}
         } message: {
             Text("₹\(amount) has been added to your wallet successfully.")
+        }
+    }
+}
+
+// MARK: - Send Message Screen
+
+struct SendMessageScreen: View {
+    @Binding var path: [AppRoute]
+    let recipientUPI: String
+    let amount: Double
+    @Environment(\.dismiss) var dismiss
+    
+    @State private var phoneNumber: String = ""
+    @State private var showPhoneInput = false
+    @State private var showSuccess = false
+    
+    private let paytmBlue = Color(red: 0, green: 0.45, blue: 0.85)
+    private let successGreen = Color(red: 0.13, green: 0.76, blue: 0.37)
+    
+    var body: some View {
+        ZStack {
+            Color(red: 0.97, green: 0.98, blue: 0.99).ignoresSafeArea()
+            
+            VStack(spacing: 24) {
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("Back")
+                        }
+                        .foregroundColor(.blue)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                
+                VStack(spacing: 16) {
+                    Text("Send Message")
+                        .font(.title2.bold())
+                    
+                    Text("Notify the recipient about payment")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+                
+                VStack(spacing: 16) {
+                    // WhatsApp Button
+                    Button {
+                        FirebaseManager.shared.sendWhatsAppMessage(
+                            phoneNumber: "+919876543210",
+                            amount: amount,
+                            senderName: "You"
+                        )
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "message.fill")
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("WhatsApp")
+                                    .font(.headline)
+                                Text("Send via WhatsApp")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right")
+                                .foregroundColor(.gray)
+                        }
+                        .padding(16)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .foregroundColor(.black)
+                    }
+                    
+                    // SMS Button
+                    Button {
+                        showPhoneInput = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "bubble.right.fill")
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("SMS")
+                                    .font(.headline)
+                                Text("Send via Text Message")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right")
+                                .foregroundColor(.gray)
+                        }
+                        .padding(16)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .foregroundColor(.black)
+                    }
+                    
+                    // Push Notification Button
+                    Button {
+                        FirebaseManager.shared.sendPushNotification(
+                            recipientID: String(recipientUPI.split(separator: "@").first ?? ""),
+                            amount: amount,
+                            senderName: "You"
+                        )
+                        showSuccess = true
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            path = []
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "bell.badge.fill")
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("App Notification")
+                                    .font(.headline)
+                                Text("Send in-app notification")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right")
+                                .foregroundColor(.gray)
+                        }
+                        .padding(16)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .foregroundColor(.black)
+                    }
+                    
+                    // Skip Button
+                    Button {
+                        path = []
+                    } label: {
+                        Text("Skip for now")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .foregroundColor(paytmBlue)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(paytmBlue, lineWidth: 1)
+                            )
+                    }
+                }
+                .padding(.horizontal, 20)
+                
+                Spacer()
+            }
+        }
+        .alert("Notification Sent! ✅", isPresented: $showSuccess) {
+            Button("Done", role: .cancel) {}
+        } message: {
+            Text("The recipient has been notified about the payment.")
         }
     }
 }

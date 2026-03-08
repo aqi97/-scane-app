@@ -121,6 +121,30 @@ final class PaymentSuccessViewController: UIViewController {
         setupUI()
         playSuccessSound()
         animateSuccess()
+        sendPaymentNotification()
+    }
+    
+    private func sendPaymentNotification() {
+        // Extract numeric amount
+        if let amountValue = Double(amount) {
+            // Send Firebase notification to the recipient
+            // Format: "aqi97@upi" -> we'll notify aqi97
+            FirebaseManager.shared.sendPaymentNotification(
+                recipientUPI: upiID,
+                amount: amountValue,
+                senderName: "You"
+            )
+            
+            // Store transaction in Firebase for history
+            let transactionID = referenceNumber
+            FirebaseManager.shared.storeTransaction(
+                senderUPI: "user@upi",
+                recipientUPI: upiID,
+                amount: amountValue,
+                transactionID: transactionID,
+                status: "completed"
+            )
+        }
     }
     
     private func playSuccessSound() {
@@ -551,8 +575,15 @@ final class PaymentSuccessViewController: UIViewController {
     }
 
     @objc private func doneTapped() {
-        // Post notification to reset the navigation stack
-        NotificationCenter.default.post(name: NSNotification.Name("PaymentDoneNotification"), object: nil)
+        // Post notification with payment info for the SendMessageScreen
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PaymentCompleted"),
+            object: nil,
+            userInfo: [
+                "upiID": upiID,
+                "amount": amount
+            ]
+        )
         
         // Dismiss this view controller
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
