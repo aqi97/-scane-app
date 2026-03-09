@@ -20,11 +20,30 @@ struct PaymentSuccessView: View {
     let upiID: String
     let amount: String
     let paymentDate: Date
+    @Environment(\.dismiss) var dismiss
 
     var body: some View {
         PaymentSuccessRepresentable(upiID: upiID, amount: amount, paymentDate: paymentDate)
             .ignoresSafeArea()
-            .navigationBarBackButtonHidden(true)   // receipt is a terminal screen
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Back")
+                                .font(.system(size: 16, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                    }
+                }
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(Color(red: 0, green: 0.45, blue: 0.85), for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
     }
 }
 
@@ -113,6 +132,20 @@ final class PaymentSuccessViewController: UIViewController {
         let ts = Int(paymentDate.timeIntervalSince1970)
         return String(format: "%012d", abs(ts) % 999_999_999_999)
     }
+    
+    private var transactionID: String {
+        // Generate unique transaction ID using UUID prefix + timestamp
+        let uuid = UUID().uuidString.prefix(8).uppercased()
+        let timestamp = Int(Date().timeIntervalSince1970)
+        return "TXN\(uuid)\(String(timestamp).suffix(6))"
+    }
+    
+    private var utrNumber: String {
+        // Generate unique UTR (Unified Transaction Reference) number
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let randomSuffix = Int.random(in: 1000...9999)
+        return String(format: "UTR%010d%04d", timestamp, randomSuffix)
+    }
 
     // MARK: - View Lifecycle
     override func viewDidLoad() {
@@ -127,21 +160,58 @@ final class PaymentSuccessViewController: UIViewController {
     private func sendPaymentNotification() {
         // Extract numeric amount
         if let amountValue = Double(amount) {
-            // Send Firebase notification to the recipient
-            // Format: "aqi97@upi" -> we'll notify aqi97
-            FirebaseManager.shared.sendPaymentNotification(
+            // Generate UPI reference number for this transaction
+            let upiRef = FirebaseManager.shared.generateUPIReference()
+            let txnID = transactionID
+            
+            // ── Store debit notification in app history ─────────
+            let accountNumber = "XXXXXXXX1605"
+            let dateStr = {
+                let f = DateFormatter(); f.dateFormat = "dd-MM-yy"; return f.string(from: Date())
+            }()
+            let debitBody = "Your A/c \(accountNumber) has been debited by Rs.\(String(format: "%.2f", amountValue)) via UPI txn on \(dateStr). UPI Ref: \(upiRef). If not done by you, report immediately to the bank on 18008901234. MASTER BANK"
+            
+            NotificationManager.shared.addNotification(
+                title: "💳 MASTER BANK - Debit Alert",
+                body: debitBody,
+                type: "debit",
+                amount: amountValue,
+                upiRef: upiRef
+            )
+            
+            // ── Store credit notification for recipient ────────
+            let creditBody = "Your A/c has been credited by Rs.\(String(format: "%.2f", amountValue)) from Sheikh Abu Mohamed via UPI on \(dateStr). UPI Ref: \(upiRef). MASTER BANK"
+            
+            NotificationManager.shared.addNotification(
+                title: "💰 Credit - ₹\(String(format: "%.2f", amountValue)) received",
+                body: creditBody,
+                type: "credit",
+                amount: amountValue,
+                upiRef: upiRef
+            )
+            
+            // Send debit notification to sender (you)
+            FirebaseManager.shared.sendDebitNotification(
+                senderUPI: "user@upi",
+                amount: amountValue,
+                recipientUPI: upiID,
+                upiRef: upiRef
+            )
+            
+            // Send credit SMS to recipient
+            FirebaseManager.shared.sendCreditNotification(
                 recipientUPI: upiID,
                 amount: amountValue,
-                senderName: "You"
+                senderName: "Sheikh Abu Mohamed",
+                upiRef: upiRef
             )
             
             // Store transaction in Firebase for history
-            let transactionID = referenceNumber
             FirebaseManager.shared.storeTransaction(
                 senderUPI: "user@upi",
                 recipientUPI: upiID,
                 amount: amountValue,
-                transactionID: transactionID,
+                transactionID: txnID,
                 status: "completed"
             )
         }
@@ -424,9 +494,25 @@ final class PaymentSuccessViewController: UIViewController {
         )
         infoStack.addArrangedSubview(dateLabel)
         
+        let txnLabel = UILabel.styled(
+            text: "Transaction ID: \(transactionID)",
+            font: .systemFont(ofSize: 12, weight: .medium),
+            color: .darkText,
+            alignment: .center
+        )
+        infoStack.addArrangedSubview(txnLabel)
+        
+        let utrLabel = UILabel.styled(
+            text: "UTR: \(utrNumber)",
+            font: .systemFont(ofSize: 12, weight: .medium),
+            color: .darkText,
+            alignment: .center
+        )
+        infoStack.addArrangedSubview(utrLabel)
+        
         let refLabel = UILabel.styled(
             text: "Ref: \(referenceNumber)",
-            font: .systemFont(ofSize: 13),
+            font: .systemFont(ofSize: 11),
             color: subtitleGray,
             alignment: .center
         )

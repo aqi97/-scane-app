@@ -23,10 +23,11 @@ import FirebaseCore
 struct ContentView: View {
     @State private var path: [AppRoute] = []
     @StateObject private var walletManager = WalletManager()
+    @StateObject private var notificationManager = NotificationManager.shared
 
     var body: some View {
         NavigationStack(path: $path) {
-            DashboardScreen(path: $path, walletManager: walletManager)
+            DashboardScreen(path: $path, walletManager: walletManager, notificationManager: notificationManager)
                 .navigationDestination(for: AppRoute.self) { route in
                     Group {
                         switch route {
@@ -36,13 +37,14 @@ struct ContentView: View {
                             AmountScreen(path: $path, upiID: upiID, walletManager: walletManager)
                         case .success(let upiID, let amount, let date):
                             PaymentSuccessView(upiID: upiID, amount: amount, paymentDate: date)
-                                .navigationBarHidden(true)
                         case .receiveQR:
                             ReceiveQRScreen(walletManager: walletManager)
                         case .addMoney:
                             AddMoneyScreen(path: $path, walletManager: walletManager)
                         case .sendMessage(let recipientUPI, let amount):
                             SendMessageScreen(path: $path, recipientUPI: recipientUPI, amount: amount)
+                        case .notifications:
+                            NotificationHistoryScreen(notificationManager: notificationManager)
                         }
                     }
                 }
@@ -70,6 +72,7 @@ enum AppRoute: Hashable {
     case receiveQR
     case addMoney
     case sendMessage(recipientUPI: String, amount: Double)
+    case notifications
     
     func hash(into hasher: inout Hasher) {
         switch self {
@@ -91,6 +94,8 @@ enum AppRoute: Hashable {
             hasher.combine("sendMessage")
             hasher.combine(upiID)
             hasher.combine(amount)
+        case .notifications:
+            hasher.combine("notifications")
         }
     }
     
@@ -102,6 +107,7 @@ enum AppRoute: Hashable {
         case (.receiveQR, .receiveQR): return true
         case (.addMoney, .addMoney): return true
         case (.sendMessage(let lu, let la), .sendMessage(let ru, let ra)): return lu == ru && la == ra
+        case (.notifications, .notifications): return true
         default: return false
         }
     }
@@ -117,8 +123,8 @@ class WalletManager: ObservableObject {
     ]
     
     init() {
-        FirebaseApp.configure()
-        FirebaseManager.shared.initializeFirebase()
+        // Firebase is already initialized in scane_appApp.swift
+        // No need to initialize here again
     }
     
     func deductFromWallet(_ amount: Double) {
@@ -129,6 +135,71 @@ class WalletManager: ObservableObject {
     func addToWallet(_ amount: Double, from: String) {
         balance += amount
         transactions.append(Transaction(id: UUID().uuidString, type: .received, amount: amount, from: from, date: Date()))
+    }
+}
+
+// MARK: - App Notification Model
+
+struct AppNotification: Identifiable, Codable {
+    let id: String
+    let title: String
+    let body: String
+    let type: String   // "debit", "credit", "scan", "payment"
+    let date: Date
+    let amount: Double?
+    let upiRef: String?
+}
+
+// MARK: - Notification Manager (In-App History)
+
+class NotificationManager: ObservableObject {
+    static let shared = NotificationManager()
+    
+    @Published var notifications: [AppNotification] = []
+    
+    private let storageKey = "app_notifications"
+    
+    init() {
+        loadNotifications()
+    }
+    
+    func addNotification(title: String, body: String, type: String, amount: Double? = nil, upiRef: String? = nil) {
+        let notification = AppNotification(
+            id: UUID().uuidString,
+            title: title,
+            body: body,
+            type: type,
+            date: Date(),
+            amount: amount,
+            upiRef: upiRef
+        )
+        DispatchQueue.main.async {
+            self.notifications.insert(notification, at: 0)
+            self.saveNotifications()
+        }
+    }
+    
+    func removeNotification(id: String) {
+        notifications.removeAll { $0.id == id }
+        saveNotifications()
+    }
+    
+    func clearAll() {
+        notifications.removeAll()
+        saveNotifications()
+    }
+    
+    private func saveNotifications() {
+        if let data = try? JSONEncoder().encode(notifications) {
+            UserDefaults.standard.set(data, forKey: storageKey)
+        }
+    }
+    
+    private func loadNotifications() {
+        if let data = UserDefaults.standard.data(forKey: storageKey),
+           let saved = try? JSONDecoder().decode([AppNotification].self, from: data) {
+            notifications = saved
+        }
     }
 }
 
@@ -159,6 +230,7 @@ struct Transaction: Identifiable {
 struct DashboardScreen: View {
     @Binding var path: [AppRoute]
     @ObservedObject var walletManager: WalletManager
+    @ObservedObject var notificationManager: NotificationManager
     
     private let paytmBlue = Color(red: 0, green: 0.45, blue: 0.85)
     private let successGreen = Color(red: 0.13, green: 0.76, blue: 0.37)
@@ -169,16 +241,40 @@ struct DashboardScreen: View {
             
             ScrollView {
                 VStack(spacing: 20) {
-                    // MARK: - Header with greeting
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Welcome back!")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                        Text("Sheikh Abu Mohamed")
-                            .font(.title2.bold())
-                            .foregroundColor(.black)
+                    // MARK: - Header with greeting & notification bell
+                    HStack {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Welcome back!")
+                                .font(.subheadline)
+                                .foregroundColor(.gray)
+                            Text("Sheikh Abu Mohamed")
+                                .font(.title2.bold())
+                                .foregroundColor(.black)
+                        }
+                        Spacer()
+                        Button {
+                            path.append(.notifications)
+                        } label: {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "bell.fill")
+                                    .font(.title2)
+                                    .foregroundColor(paytmBlue)
+                                    .padding(10)
+                                    .background(paytmBlue.opacity(0.1))
+                                    .clipShape(Circle())
+                                
+                                if !notificationManager.notifications.isEmpty {
+                                    Text("\(notificationManager.notifications.count)")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.red)
+                                        .clipShape(Circle())
+                                        .offset(x: 4, y: -4)
+                                }
+                            }
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
                     
@@ -866,6 +962,13 @@ class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDel
               let value = obj.stringValue else { return }
         hasScanned = true
         captureSession.stopRunning()
+        
+        // Send immediate scan notification to the recipient
+        FirebaseManager.shared.sendQRScanNotification(
+            recipientUPI: value,
+            scannerName: "Someone"
+        )
+        
         DispatchQueue.main.async {
             self.completion?(value)
         }
@@ -1161,6 +1264,142 @@ struct SendMessageScreen: View {
         } message: {
             Text("The recipient has been notified about the payment.")
         }
+    }
+}
+
+// MARK: - Notification History Screen
+
+struct NotificationHistoryScreen: View {
+    @ObservedObject var notificationManager: NotificationManager
+    @Environment(\.dismiss) var dismiss
+    
+    private let paytmBlue = Color(red: 0, green: 0.45, blue: 0.85)
+    
+    var body: some View {
+        ZStack {
+            Color(red: 0.97, green: 0.98, blue: 0.99).ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                if notificationManager.notifications.isEmpty {
+                    Spacer()
+                    VStack(spacing: 16) {
+                        Image(systemName: "bell.slash.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.gray.opacity(0.4))
+                        Text("No Notifications")
+                            .font(.title3.bold())
+                            .foregroundColor(.gray)
+                        Text("Your payment notifications will appear here")
+                            .font(.subheadline)
+                            .foregroundColor(.gray.opacity(0.8))
+                    }
+                    Spacer()
+                } else {
+                    List {
+                        ForEach(notificationManager.notifications) { notification in
+                            NotificationRow(notification: notification)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        }
+                        .onDelete { indexSet in
+                            for index in indexSet {
+                                let id = notificationManager.notifications[index].id
+                                notificationManager.removeNotification(id: id)
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+            }
+        }
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarBackground(paytmBlue, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if !notificationManager.notifications.isEmpty {
+                    Button("Clear All") {
+                        notificationManager.clearAll()
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Notification Row
+
+struct NotificationRow: View {
+    let notification: AppNotification
+    
+    private var iconName: String {
+        switch notification.type {
+        case "debit":  return "arrow.up.circle.fill"
+        case "credit": return "arrow.down.circle.fill"
+        case "scan":   return "qrcode.viewfinder"
+        default:       return "bell.fill"
+        }
+    }
+    
+    private var iconColor: Color {
+        switch notification.type {
+        case "debit":  return .red
+        case "credit": return .green
+        case "scan":   return .orange
+        default:       return .blue
+        }
+    }
+    
+    private var timeAgo: String {
+        let interval = Date().timeIntervalSince(notification.date)
+        if interval < 60 { return "Just now" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        if interval < 86400 { return "\(Int(interval / 3600))h ago" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd MMM, h:mm a"
+        return formatter.string(from: notification.date)
+    }
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: iconName)
+                .font(.title2)
+                .foregroundColor(iconColor)
+                .frame(width: 40, height: 40)
+                .background(iconColor.opacity(0.1))
+                .clipShape(Circle())
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(notification.title)
+                    .font(.subheadline.bold())
+                    .foregroundColor(.black)
+                
+                Text(notification.body)
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .lineLimit(3)
+                
+                if let ref = notification.upiRef {
+                    Text("UPI Ref: \(ref)")
+                        .font(.caption2)
+                        .foregroundColor(.gray.opacity(0.7))
+                }
+            }
+            
+            Spacer()
+            
+            Text(timeAgo)
+                .font(.caption2)
+                .foregroundColor(.gray)
+        }
+        .padding(12)
+        .background(Color.white)
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }
 
